@@ -26,8 +26,8 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from env import RacingEnv, make_racing_env
 
-UID = "000000000"  # Replace with your unique UID for submission
-NAME = "Your Agent Name"  # Replace with your agent's name
+UID = "606322930"  # Replace with your unique UID for submission
+NAME = "MW-0"  # Replace with your agent's name
 
 assert UID != "000000000", "Please update the UID"
 if NAME == "Your Agent Name":
@@ -73,7 +73,7 @@ def parse_args():
                         choices=["random", "aggressive", "still"])
     parser.add_argument("--save-dir", type=str, default="checkpoints")
     parser.add_argument("--log-dir", type=str, default="logs")
-    parser.add_argument("--save-freq", type=int, default=10_000)
+    parser.add_argument("--save-freq", type=int, default=100_000)
     parser.add_argument("--eval-freq", type=int, default=50_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -179,10 +179,18 @@ def main():
     print(f"\nTraining complete in {elapsed:.0f}s")
     print(f"Final model saved to {final_path}")
 
-    # Auto-convert to submission format
+    # Auto-convert to submission format (final and best)
     print("\nConverting to submission format...")
-    convert_to_submission(model, os.path.join("agents", f"agent_{UID}"))
-    print(f"Done! Example agent saved to agents/agent_{UID}/")
+    convert_to_submission(model, os.path.join("agents", f"agent_{UID}_final"))
+    print(f"Final agent saved to agents/agent_{UID}_final/")
+
+    best_model_path = os.path.join(args.save_dir, "best", "best_model.zip")
+    if os.path.exists(best_model_path):
+        best_model = PPO.load(best_model_path, env=train_envs)
+        convert_to_submission(best_model, os.path.join("agents", f"agent_{UID}_best"))
+        print(f"Best agent saved to agents/agent_{UID}_best/")
+    else:
+        print("No best model found, skipping best agent conversion.")
 
     train_envs.close()
     eval_envs.close()
