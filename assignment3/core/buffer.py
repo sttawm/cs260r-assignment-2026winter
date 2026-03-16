@@ -91,6 +91,7 @@ class PPORolloutStorage(BaseRolloutStorage):
                 #  * The return at timestep t should be (advantage_t + value_t)
                 # How to compute value_t?
                 #  * The value_t is the value prediction at timestep t, from self.value_preds
+                value_t = self.value_preds[step]
                 # How to compute advantage_t?
                 #  * Let's define a running variable `gae` to store the advantage_t.
                 #  * The variable `step` will be t=T-1, t=T-2, ..., t=0, where T is the total number of steps.
@@ -103,8 +104,9 @@ class PPORolloutStorage(BaseRolloutStorage):
                 #  * Again, you should be very careful to handle the `next mask`.
                 #  * The final `gae` is the sum of TD error and future gae.
                 #  * After getting gae=advantage_t, we can fill the self.returns[t] by `advantage_t + value_t`.
-                pass
-                # self.returns[step] = ???
-                pass
+                td_error = self.rewards[step] + gamma * self.value_preds[step + 1] * self.masks[step + 1] - value_t
+                future_gae = gamma * self.gae_lambda * self.masks[step + 1] * gae
+                gae = td_error + future_gae
+                self.returns[step] = gae + value_t
         else:
             raise NotImplementedError()

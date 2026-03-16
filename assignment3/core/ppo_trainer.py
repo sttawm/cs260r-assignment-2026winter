@@ -18,6 +18,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
+from torch.distributions import Normal
 
 current_dir = osp.join(osp.abspath(osp.dirname(__file__)))
 sys.path.append(current_dir)
@@ -28,12 +29,20 @@ from buffer import PPORolloutStorage
 from network import PPOModel
 
 
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 class PPOConfig:
     """Not like previous assignment where we use a dict as config, here we
     build a class to represent config."""
     def __init__(self):
         # Common
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
         self.save_freq = 10
         self.log_freq = 1
         self.num_envs = 1
@@ -118,19 +127,30 @@ class PPOTrainer:
     def compute_action(self, obs, deterministic=False):
         obs = self.process_obs(obs)
 
-        # TODO: Get the actions and the log probability of the action from the output of the neural network (self.model)
+        # DONE: Get the actions and the log probability of the action from the output of the neural network (self.model)
         #  Hint: Use proper torch distribution to help you
         actions, action_log_probs = None, None
 
         if self.discrete:  # Please use categorical distribution.
             logits, values = self.model(obs)
-            pass
+            dist = Categorical(logits=logits)
+            if deterministic:
+                actions = torch.argmax(logits, dim=-1)
+            else:
+                actions = dist.sample()
+            action_log_probs = dist.log_prob(actions)
 
             actions = actions.view(-1, 1)  # In discrete case only return the chosen action.
 
         else:  # Please use normal distribution.
             means, log_std, values = self.model(obs)
-            pass
+            std = log_std.exp()
+            dist = Normal(means, std)
+            if deterministic:
+                actions = means
+            else:
+                actions = dist.sample()
+            action_log_probs = dist.log_prob(actions).sum(dim=-1)
 
             actions = actions.view(-1, self.num_actions)
 
@@ -141,7 +161,7 @@ class PPOTrainer:
 
     def evaluate_actions(self, obs, act):
         """
-        TODO: Run models to get the values, log probability and action distribution entropy of the
+        DONE: Run models to get the values, log probability and action distribution entropy of the
          action in current state
         """
 
@@ -150,16 +170,19 @@ class PPOTrainer:
         if self.discrete:
             assert not torch.is_floating_point(act)
             logits, values = self.model(obs)
-            action_log_probs = None
-            dist_entropy = None
-            pass
+            dist = Categorical(logits=logits)
+            act = act.view(-1)
+            action_log_probs = dist.log_prob(act)
+            dist_entropy = dist.entropy().mean()
 
         else:
             assert torch.is_floating_point(act)
             means, log_std, values = self.model(obs)
-            action_log_probs = None
-            dist_entropy = None
-            pass
+            std = log_std.exp()
+            dist = Normal(means, std)
+            act = act.view(-1, self.num_actions)
+            action_log_probs = dist.log_prob(act).sum(dim=-1)
+            dist_entropy = dist.entropy().sum(dim=-1).mean()
 
         values = values.view(-1, 1)
         action_log_probs = action_log_probs.view(-1, 1)
@@ -186,7 +209,7 @@ class PPOTrainer:
         log_dir = os.path.abspath(os.path.expanduser(log_dir))
         save_path = os.path.join(log_dir, "checkpoint-{}.pkl".format(suffix))
         if os.path.isfile(save_path):
-            state_dict = torch.load(save_path, torch.device('cpu') if not torch.cuda.is_available() else None)
+            state_dict = torch.load(save_path, map_location=self.device)
             self.model.load_state_dict(state_dict["model"])
             self.optimizer.load_state_dict(state_dict["optimizer"])
             print("Successfully load weights from {}!".format(save_path))
@@ -211,14 +234,20 @@ class PPOTrainer:
         assert action_log_probs.requires_grad
         assert dist_entropy.requires_grad
 
-        # TODO: Implement policy loss
-        policy_loss = None
-        ratio = None  # The importance sampling factor, the ratio of new policy prob over old policy prob
-        pass
+        # Policy loss with clipped surrogate objective
+        ratio = torch.exp(action_log_probs - old_action_log_probs_batch)
+        surr1 = ratio * adv_targ
+        surr2 = torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * adv_targ
+        policy_loss = -torch.minimum(surr1, surr2)
 
-        # TODO: Implement value loss
-        # value_loss = None
-        pass
+        # Value function loss with optional clipping (same clip as policy for simplicity)
+        value_pred_clipped = value_preds_batch + torch.clamp(values - value_preds_batch,
+                                                             -self.clip_param, self.clip_param)
+        value_losses = (values - return_batch).pow(2)
+        value_losses_clipped = (value_pred_clipped - return_batch).pow(2)
+        value_loss = 0.5 * torch.maximum(value_losses, value_losses_clipped)
+
+        policy_loss_mean = policy_loss.mean()
 
         value_loss_mean = value_loss.mean()
 
@@ -285,7 +314,7 @@ if __name__ == '__main__':
         def __init__(self):
             super(FakeConfig, self).__init__()
 
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.device = get_device()
             self.num_envs = 1
             self.num_steps = 200
             self.gamma = 0.99

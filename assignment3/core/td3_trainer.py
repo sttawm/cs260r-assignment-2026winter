@@ -23,7 +23,16 @@ sys.path.append(current_dir)
 sys.path.append(osp.dirname(current_dir))
 print(current_dir)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+device = get_device()
 
 
 class ReplayBuffer(object):
@@ -38,7 +47,7 @@ class ReplayBuffer(object):
         self.reward = np.zeros((max_size, 1))
         self.not_done = np.zeros((max_size, 1))
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
 
     def add(self, state, action, next_state, reward, done):
         self.state[self.ptr] = state
@@ -155,36 +164,36 @@ class TD3Trainer:
         # Sample replay buffer
         state, action, next_state, reward, not_done = replay_buffer.sample(batch_size)
 
-        # TODO: Following the TODOs below to implement critic loss
+        # DONE: Following the TODOs below to implement critic loss
         with torch.no_grad():
-            # TODO: Generate noise and clipped the noise.
+            # DONE: Generate noise and clipped the noise.
             # Hint: Sample a noise from Normal distribution with the STD=self.policy_noise.
             # The shape should be the same as the action.
-            # noise = (
-            #         ???
-            # ).clamp(-self.noise_clip, self.noise_clip)
-            pass
+            noise = (
+                    torch.randn_like(action) * self.policy_noise
+            ).clamp(-self.noise_clip, self.noise_clip)
 
-            # TODO: Select next action according to the delayed-updated policy (self.actor_target) and add noise.
+            # DONE: Select next action according to the delayed-updated policy (self.actor_target) and add noise.
             # Hint: The next action should be clipped by the +- self.max_action.
             # The shape of next_action should be the same as the action.
-            # next_action = (
-            #         ???
-            # ).clamp(-self.max_action, self.max_action)
-            pass
+            next_action = (
+                    self.actor_target(next_state) + noise
+            ).clamp(-self.max_action, self.max_action)
 
-            # TODO: Compute the target Q value (the objective of both critics).
+            # DONE: Compute the target Q value (the objective of both critics).
             # Hint: Call the delayed-updated critic (self.critic_target) first, then compute the critic objective.
-            target_Q = None
-            pass
+            target_Q = reward + not_done * self.discount * torch.min(
+                *self.critic_target(next_state, next_action)
+            )
+
+            
 
         # Get current Q estimates
         current_Q1, current_Q2 = self.critic(state, action)
 
-        # TODO: Compute critic loss.
+        # DONE: Compute critic loss.
         # Hint: Compute the MSE for both critics and sum them up.
-        critic_loss = None
-        pass
+        critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
 
         # Optimize the critic
         self.critic_optimizer.zero_grad()
@@ -196,11 +205,10 @@ class TD3Trainer:
         # Delayed policy updates
         if self.total_it % self.policy_freq == 0:
 
-            # TODO: Compute the actor loss
+            # DONE: Compute the actor loss
             # Hint: The actor loss is the negative Q value of the critic, where the action is provided by the current
             # actor.
-            actor_loss = None
-            pass
+            actor_loss = - self.critic.Q1(state, self.actor(state)).mean()
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()
