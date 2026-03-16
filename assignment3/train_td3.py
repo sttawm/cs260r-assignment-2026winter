@@ -20,7 +20,16 @@ from core.envs import make_envs
 from core.td3_trainer import ReplayBuffer, TD3Trainer
 from core.utils import pretty_print, Timer
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+device = get_device()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -122,11 +131,11 @@ if __name__ == "__main__":
         if t < args.start_steps:
             action = env.action_space.sample()
         else:
-            # TODO: Uncomment these lines and learn how TD3 generates exploratory actions.
-            # action = (
-            #     policy.select_action(np.array(state)) +
-            #     np.random.normal(0, max_action * args.explore_noise, size=action_dim)
-            # ).clip(-max_action, max_action)
+            # DONE: Uncomment these lines and learn how TD3 generates exploratory actions.
+            action = (
+                policy.select_action(np.array(state)) +
+                np.random.normal(0, max_action * args.explore_noise, size=action_dim)
+            ).clip(-max_action, max_action)
 
         # Perform action
         next_state, reward, terminated, truncated, info = env.step(action)

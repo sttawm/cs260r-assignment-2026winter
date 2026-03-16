@@ -55,7 +55,16 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-default_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+default_device = get_device()
 
 
 def to_tensor(obs):
