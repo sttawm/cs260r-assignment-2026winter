@@ -138,11 +138,21 @@ def main():
         RacingMetricsCallback(),
     ]
 
+    # Select device
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    print(f"  Device: {device}")
+
     # Create PPO agent with tuned hyperparameters
     model = PPO(
         "MlpPolicy",
         train_envs,
         verbose=1,
+        device=device,
         seed=args.seed,
         tensorboard_log=args.log_dir,
         n_steps=args.n_steps,
