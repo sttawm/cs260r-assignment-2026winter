@@ -20,7 +20,7 @@ Once you get confirmation, kick off the experimentation.
 
 ## Experimentation
 
-Each experiment runs on CPU/MPS. The training script runs for a **fixed time budget of 2 hours** (wall clock training time, excluding startup and evaluation). You launch it simply as: `python train.py`.
+Each experiment runs on CPU/MPS. The training script runs for up to a **fixed time budget of 2 hours** (wall clock training time, excluding startup and evaluation). Training may stop earlier if `speed_score` has not improved for 3 consecutive 20-minute evaluations (60 min without progress). You launch it simply as: `python train.py`.
 
 **What you CAN do:**
 - Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
@@ -30,7 +30,7 @@ Each experiment runs on CPU/MPS. The training script runs for a **fixed time bud
 - Install new packages or add dependencies. You can only use what's already in `pyproject.toml`.
 - Modify the evaluation harness. The `evaluate()` function in `prepare.py` is the ground truth metric.
 
-**The goal is simple: maximize `speed_score` against example_agent across all 7 maps.** Since the time budget is fixed, you don't need to worry about training time — it's always 2 hours. Everything is fair game: change the RL algorithm entirely, the model architecture, the optimizer, the hyperparameters, the network size. The only constraint is that the code runs without crashing and finishes within the time budget.
+**The goal is simple: maximize `speed_score` against example_agent across all 7 maps.** Since the time budget is fixed, you don't need to worry about training time — it's always 2 hours (`MAX_TRAIN_DURATION_SECONDS` in `prepare.py`). Everything is fair game: change the RL algorithm entirely, the model architecture, the optimizer, the hyperparameters, the network size. The only constraint is that the code runs without crashing and finishes within the time budget.
 
 `speed_score` is defined as:
 
@@ -75,36 +75,35 @@ Once the script finishes it prints a summary like this:
 ========================================================================
 ```
 
-Note that the script is configured to always stop after 2 hours. You can extract the key metric from the log file:
+The script evaluates every 20 minutes and stops early if there is no improvement for 3 consecutive evaluations. You can extract the per-checkpoint scores from the log file:
 
 ```
-grep "^  speed_score:" run.log
+grep "^\[.*min\] speed_score:" run.log
 ```
 
 ## Logging results
 
 When an experiment is done, log it to `results.tsv` (tab-separated, NOT comma-separated — commas break in descriptions).
 
-The TSV has a header row and 5 columns:
+The TSV has a header row. Columns are `commit`, one column per 20-minute checkpoint, `status`, and `description`:
 
 ```
-commit	speed_score	win_rate	status	description
+commit	20min	40min	60min	80min	100min	120min	status	description
 ```
 
 1. git commit hash (short, 7 chars)
-2. speed_score (e.g. 0.000312) — use 0.000000 for crashes
-3. win_rate achieved (e.g. 0.238095) — use 0.000000 for crashes; kept for reference
-4. status: `keep`, `discard`, or `crash`
-5. short text description of what this experiment tried
+2–7. `speed_score` at each 20-minute evaluation checkpoint. Use `—` if training stopped before that point, `0.000000` for a crash.
+8. status: `keep`, `discard`, or `crash`
+9. short text description of what this experiment tried
 
 Example:
 
 ```
-commit	speed_score	win_rate	status	description
-a1b2c3d	0.000312	0.238095	keep	baseline
-b2c3d4e	0.000389	0.333333	keep	increase LR to 3e-3
-c3d4e5f	0.000271	0.190476	discard	switch to ReLU activation
-d4e5f6g	0.000000	0.000000	crash	512x512 network (OOM on MPS)
+commit	20min	40min	60min	80min	100min	120min	status	description
+a1b2c3d	0.000180	0.000251	0.000312	0.000298	0.000301	0.000309	keep	baseline
+b2c3d4e	0.000210	0.000389	0.000401	—	—	—	keep	increase LR to 3e-3 (early stop at 60min)
+c3d4e5f	0.000150	0.000190	0.000200	0.000195	0.000198	0.000201	discard	switch to ReLU
+d4e5f6g	0.000000	—	—	—	—	—	crash	512x512 network (OOM on MPS)
 ```
 
 ## The experiment loop
@@ -117,18 +116,18 @@ LOOP FOREVER:
 2. Tune `train.py` with an experimental idea by directly hacking the code.
 3. git commit
 4. Run the experiment: `uv run python train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-5. Read out the results:
+5. Read out the per-checkpoint scores:
    ```
-   grep "^  speed_score:\|^  win_rate:" run.log
+   grep "^\[.*min\] speed_score:" run.log
    ```
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
-7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git — it must survive `git reset` when discarding experiments)
-8. If `speed_score` improved (higher), you "advance" the branch, keeping the git commit
-9. If equal or worse, you git reset back to where you started
+7. Record the results in the tsv — fill in each 20-min column from the grep output above, using `—` for any checkpoint not reached. (NOTE: do not commit results.tsv — it must survive `git reset` when discarding experiments)
+8. If the best checkpoint `speed_score` improved (higher) over the previous best, you "advance" the branch, keeping the git commit
+9. If equal or worse at every checkpoint, you git reset back to where you started
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
 
-**Timeout**: Each experiment takes exactly 2 hours (the `TimeLimitCallback` enforces this). Budget ~15 minutes extra for startup and post-training evaluation. If a run exceeds 2.5 hours total, kill it and treat it as a failure (discard and revert).
+**Timeout**: Each experiment runs for up to 2 hours (`TimeLimitCallback`) but may stop earlier via early stopping. Budget ~30 minutes extra for startup and post-training evaluation. If a run exceeds 2.5 hours total, kill it and treat it as a failure (discard and revert).
 
 **Crashes**: If a run crashes (OOM, or a bug, or etc.), use your judgment: If it's something dumb and easy to fix (e.g. a typo, a missing import), fix it and re-run. If the idea itself is fundamentally broken, just skip it, log "crash" as the status in the tsv, and move on.
 

@@ -7,7 +7,7 @@ from metadrive.envs.marl_envs.marl_racing_env import MultiAgentRacingEnv
 
 from racing_maps import set_racing_map
 
-MAX_TRAIN_DURATION_SECONDS = 3 * 60  # 3 minutes
+MAX_TRAIN_DURATION_SECONDS = 2 * 60 * 60  # 2 hours
 
 _ALL_MAPS = ["circuit", "hairpin", "oval", "chicane", "technical", "mountain", "street"]
 _RACES_PER_MAP = 3  # 7 maps × 3 = 21 total races

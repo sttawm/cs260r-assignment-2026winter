@@ -20,7 +20,7 @@ import numpy as np
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import (
-    BaseCallback, CheckpointCallback, EvalCallback,
+    BaseCallback, CheckpointCallback,
 )
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
@@ -63,6 +63,71 @@ class TimeLimitCallback(BaseCallback):
         return True
 
 
+class PeriodicEvalCallback(BaseCallback):
+    """
+    Every EVAL_INTERVAL_S wall-clock seconds, runs evaluate() on all 7 maps.
+
+    - Saves the model to <save_dir>/best_by_winrate whenever win_rate improves.
+    - Stops training early when win_rate has not improved for PATIENCE consecutive
+      evaluations (default 3 × 20 min = 60 min without progress).
+    - Stores each checkpoint's win_rate in self.checkpoint_win_rates
+      keyed by the nominal minute (20, 40, 60, …) for TSV logging.
+    """
+
+    EVAL_INTERVAL_S = 20 * 60  # 20 minutes
+    PATIENCE = 3
+
+    def __init__(self, save_dir: str, seed: int = 42, verbose: int = 0):
+        super().__init__(verbose)
+        self._save_dir = save_dir
+        self._seed = seed
+        self._train_start: float | None = None
+        self._next_eval_at: float | None = None
+        self._eval_num = 0
+        self._best_score = -1.0
+        self._no_improve_streak = 0
+        self.checkpoint_scores: dict[int, float] = {}   # {20: 0.000312, 40: 0.000389, …}
+
+    def _on_training_start(self) -> None:
+        self._train_start = time.time()
+        self._next_eval_at = self._train_start + self.EVAL_INTERVAL_S
+
+    def _on_step(self) -> bool:
+        if time.time() < self._next_eval_at:
+            return True
+
+        self._eval_num += 1
+        bucket = self._eval_num * 20   # nominal minute: 20, 40, 60, …
+        elapsed_min = (time.time() - self._train_start) / 60
+        print(f"\n[Periodic eval #{self._eval_num}]  t={elapsed_min:.0f}min")
+
+        results = evaluate(self.model, seed=self._seed)
+        score = results["speed_score"]
+        self.checkpoint_scores[bucket] = score
+        # Machine-readable line for grep
+        print(f"[{bucket}min] speed_score: {score:.6f}")
+
+        self._next_eval_at = time.time() + self.EVAL_INTERVAL_S
+
+        if score > self._best_score:
+            self._best_score = score
+            self._no_improve_streak = 0
+            save_path = os.path.join(self._save_dir, "best_by_score")
+            self.model.save(save_path)
+            print(f"  New best — saved to {save_path}")
+        else:
+            self._no_improve_streak += 1
+            print(f"  No improvement  ({self._no_improve_streak}/{self.PATIENCE}).  "
+                  f"Best so far: {self._best_score:.6f}")
+            if self._no_improve_streak >= self.PATIENCE:
+                print(f"\nEarly stopping: no improvement for "
+                      f"{self.PATIENCE} consecutive evals "
+                      f"({self.PATIENCE * 20} min).")
+                return False
+
+        return True
+
+
 class RacingMetricsCallback(BaseCallback):
     """Logs additional racing-specific metrics to TensorBoard."""
 
@@ -96,14 +161,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train a racing agent (full example)")
     parser.add_argument("--total-timesteps", type=int, default=1_000_000_000)
     parser.add_argument("--num-train-envs", type=int, default=8)
-    parser.add_argument("--num-eval-envs", type=int, default=2)
     parser.add_argument("--num-agents", type=int, default=2)
     parser.add_argument("--opponent-policy", type=str, default="aggressive",
                         choices=["random", "aggressive", "still"])
     parser.add_argument("--save-dir", type=str, default="checkpoints")
     parser.add_argument("--log-dir", type=str, default="logs")
     parser.add_argument("--save-freq", type=int, default=10_000)
-    parser.add_argument("--eval-freq", type=int, default=50_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--n-steps", type=int, default=512)
@@ -143,29 +206,16 @@ def main():
         ) for i in range(args.num_train_envs)]
     )
 
-    eval_envs = SubprocVecEnv(
-        [make_racing_env(
-            rank=100 + i,
-            num_agents=args.num_agents,
-            opponent_policy=args.opponent_policy,
-        ) for i in range(args.num_eval_envs)]
-    )
+    periodic_cb = PeriodicEvalCallback(save_dir=args.save_dir, seed=args.seed)
 
     # Callbacks
     callbacks = [
         TimeLimitCallback(MAX_TRAIN_DURATION_SECONDS),
+        periodic_cb,
         CheckpointCallback(
             save_freq=max(args.save_freq // args.num_train_envs, 1),
             save_path=args.save_dir,
             name_prefix="racing_ppo",
-        ),
-        EvalCallback(
-            eval_envs,
-            best_model_save_path=os.path.join(args.save_dir, "best"),
-            log_path=args.log_dir,
-            eval_freq=max(args.eval_freq // args.num_train_envs, 1),
-            n_eval_episodes=10,
-            deterministic=True,
         ),
         RacingMetricsCallback(),
     ]
@@ -213,32 +263,25 @@ def main():
     print(f"Final model saved to {final_path}")
 
     train_envs.close()
-    eval_envs.close()
+
+    # ── Score progression ────────────────────────────────────────────────
+    print("\nSpeed-score progression:")
+    for bucket in sorted(periodic_cb.checkpoint_scores):
+        print(f"  {bucket:3d}min: {periodic_cb.checkpoint_scores[bucket]:.6f}")
 
     # ── Model selection ──────────────────────────────────────────────────
-    # Evaluate both the final model and the EvalCallback's best checkpoint,
-    # then use whichever scores higher win_rate for submission.
-    best_ckpt_path = os.path.join(args.save_dir, "best", "best_model.zip")
-
-    print("\nEvaluating final model...")
-    final_results = evaluate(model, seed=args.seed)
-
-    best_model = model
-    if os.path.exists(best_ckpt_path):
-        print("Evaluating best checkpoint (saved by EvalCallback)...")
-        ckpt = PPO.load(best_ckpt_path, device=device)
-        ckpt_results = evaluate(ckpt, seed=args.seed)
-        if ckpt_results["win_rate"] > final_results["win_rate"]:
-            print(f"Best checkpoint wins "
-                  f"({ckpt_results['win_rate']:.1%} > {final_results['win_rate']:.1%}) "
-                  f"— using checkpoint for submission.")
-            best_model = ckpt
-        else:
-            print(f"Final model wins "
-                  f"({final_results['win_rate']:.1%} >= {ckpt_results['win_rate']:.1%}) "
-                  f"— using final model for submission.")
+    # Use the checkpoint that achieved the highest speed_score during training;
+    # fall back to the final model if no periodic eval ran yet.
+    best_ckpt_path = os.path.join(args.save_dir, "best_by_score.zip")
+    if os.path.exists(best_ckpt_path) and periodic_cb._best_score >= 0:
+        print(f"\nLoading best checkpoint (speed_score={periodic_cb._best_score:.6f})...")
+        best_model = type(model).load(best_ckpt_path, device=device)
     else:
-        print("No EvalCallback checkpoint found — using final model.")
+        print("\nNo periodic-eval checkpoint found — using final model.")
+        best_model = model
+
+    print("\nFinal evaluation of selected model:")
+    evaluate(best_model, seed=args.seed)
 
     # Convert the winning model to submission format
     print("\nConverting to submission format...")
