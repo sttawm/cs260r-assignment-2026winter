@@ -174,7 +174,7 @@ def parse_args():
     parser.add_argument("--n-epochs", type=int, default=10)
     parser.add_argument("--clip-range", type=float, default=0.2)
     parser.add_argument("--ent-coef", type=float, default=0.01)
-    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--gamma", type=float, default=0.95)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     return parser.parse_args()
 
