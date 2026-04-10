@@ -61,9 +61,103 @@ class RacingMapHairpin(PGMap):
 
 
 
+class RacingMapOval(PGMap):
+    """Difficulty 1/5 — long straights and wide sweeping curves. Tests raw speed."""
+    def _generate(self):
+        assert len(self.road_network.graph) == 0
+        _build_track(self, [
+            ("straight", {Parameter.length: 280}),
+            ("curve",    {Parameter.length: 80, Parameter.radius: 90, Parameter.angle: 90, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 220}),
+            ("curve",    {Parameter.length: 80, Parameter.radius: 90, Parameter.angle: 90, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 280}),
+            ("curve",    {Parameter.length: 80, Parameter.radius: 90, Parameter.angle: 90, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 220}),
+            ("curve",    {Parameter.length: 80, Parameter.radius: 90, Parameter.angle: 90, Parameter.dir: 1}),
+        ])
+
+
+class RacingMapChicane(PGMap):
+    """Difficulty 2/5 — alternating S-curves between straights. Tests smooth steering."""
+    def _generate(self):
+        assert len(self.road_network.graph) == 0
+        _build_track(self, [
+            ("straight", {Parameter.length: 180}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 50, Parameter.angle: 40, Parameter.dir: 1}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 50, Parameter.angle: 40, Parameter.dir: 0}),
+            ("straight", {Parameter.length: 130}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 50, Parameter.angle: 40, Parameter.dir: 0}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 50, Parameter.angle: 40, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 180}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 45, Parameter.angle: 40, Parameter.dir: 1}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 45, Parameter.angle: 40, Parameter.dir: 0}),
+            ("straight", {Parameter.length: 130}),
+        ])
+
+
+class RacingMapTechnical(PGMap):
+    """Difficulty 3/5 — varied layout mixing fast straights and tight corners."""
+    def _generate(self):
+        assert len(self.road_network.graph) == 0
+        _build_track(self, [
+            ("straight", {Parameter.length: 160}),
+            ("curve",    {Parameter.length: 50, Parameter.radius: 35, Parameter.angle: 90, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 60}),
+            ("curve",    {Parameter.length: 50, Parameter.radius: 35, Parameter.angle: 90, Parameter.dir: 0}),
+            ("straight", {Parameter.length: 120}),
+            ("curve",    {Parameter.length: 60, Parameter.radius: 45, Parameter.angle: 120, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 80}),
+            ("curve",    {Parameter.length: 45, Parameter.radius: 28, Parameter.angle: 90, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 90}),
+        ])
+
+
+class RacingMapMountain(PGMap):
+    """Difficulty 4/5 — tight switchbacks with short recovery straights."""
+    def _generate(self):
+        assert len(self.road_network.graph) == 0
+        _build_track(self, [
+            ("straight", {Parameter.length: 80}),
+            ("curve",    {Parameter.length: 40, Parameter.radius: 22, Parameter.angle: 180, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 60}),
+            ("curve",    {Parameter.length: 40, Parameter.radius: 22, Parameter.angle: 180, Parameter.dir: 0}),
+            ("straight", {Parameter.length: 60}),
+            ("curve",    {Parameter.length: 35, Parameter.radius: 22, Parameter.angle: 90, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 40}),
+            ("curve",    {Parameter.length: 40, Parameter.radius: 22, Parameter.angle: 180, Parameter.dir: 0}),
+            ("straight", {Parameter.length: 60}),
+            ("curve",    {Parameter.length: 35, Parameter.radius: 22, Parameter.angle: 90, Parameter.dir: 1}),
+        ])
+
+
+class RacingMapStreet(PGMap):
+    """Difficulty 5/5 — many tight corners with minimal straights. Very technical."""
+    def _generate(self):
+        assert len(self.road_network.graph) == 0
+        _build_track(self, [
+            ("straight", {Parameter.length: 55}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 18, Parameter.angle: 90,  Parameter.dir: 1}),
+            ("straight", {Parameter.length: 35}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 18, Parameter.angle: 90,  Parameter.dir: 0}),
+            ("straight", {Parameter.length: 35}),
+            ("curve",    {Parameter.length: 40, Parameter.radius: 15, Parameter.angle: 135, Parameter.dir: 1}),
+            ("straight", {Parameter.length: 25}),
+            ("curve",    {Parameter.length: 40, Parameter.radius: 15, Parameter.angle: 135, Parameter.dir: 0}),
+            ("straight", {Parameter.length: 30}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 18, Parameter.angle: 90,  Parameter.dir: 1}),
+            ("straight", {Parameter.length: 55}),
+            ("curve",    {Parameter.length: 30, Parameter.radius: 18, Parameter.angle: 90,  Parameter.dir: 0}),
+        ])
+
+
 RACING_MAPS = {
-    "circuit": RacingMap,
-    "hairpin": RacingMapHairpin,
+    "circuit":   RacingMap,
+    "hairpin":   RacingMapHairpin,
+    "oval":      RacingMapOval,
+    "chicane":   RacingMapChicane,
+    "technical": RacingMapTechnical,
+    "mountain":  RacingMapMountain,
+    "street":    RacingMapStreet,
 }
 
 

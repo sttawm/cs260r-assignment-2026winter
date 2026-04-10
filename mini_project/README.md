@@ -54,6 +54,27 @@ You are free to choose **any RL algorithm or codebase** to train your agent.
 * Remember that we only require you to submit one agent and there is no requirement on which environment configuration
   or which algorithm you use to acquire the agent.
 
+## Collecting Human Demonstrations (Behavior Cloning)
+
+```bash
+uv sync                          # install dependencies (first time only)
+
+uv run python collect_demos.py   # one episode on the default circuit map
+
+# Options
+uv run python collect_demos.py --map oval          # choose a map
+uv run python collect_demos.py --episodes 5        # collect multiple episodes in one session
+uv run python collect_demos.py --output demos/my_demos.npz   # fixed output file (appended on repeat runs)
+```
+
+Controls: arrow keys to drive, hold **Space** to suppress recording (navigate into a bad spot
+without recording it, release to record the recovery), **ESC** to end early.
+
+After each episode you are prompted in the terminal to save or discard.
+Saved data: `demos/demo_<timestamp>.npz` with keys `observations (N,161)` and `actions (N,2)`.
+
+---
+
 ## **2 Training Example**
 
 ```bash

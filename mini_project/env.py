@@ -70,9 +70,17 @@ class RacingEnv(gymnasium.Env):
     ):
         super().__init__()
 
-        config = {
+        self.num_agents = num_agents
+        self.ego_id = "agent0"
+
+        if isinstance(opponent_policy, str):
+            self._opponent_fn = OPPONENT_POLICIES[opponent_policy]
+        else:
+            self._opponent_fn = opponent_policy
+
+        base_config = {
             "num_agents": num_agents,
-            "use_render": render_mode == "human",
+            "use_render": False,
             "crash_done": False,
             "crash_vehicle_done": False,
             "out_of_road_done": True,
@@ -86,27 +94,29 @@ class RacingEnv(gymnasium.Env):
                 "neck_length": 20,
             },
         }
-        if extra_config:
-            config.update(extra_config)
+        # Probe observation/action spaces with a headless env.
+        # Do NOT merge extra_config here — unknown keys (e.g. render options
+        # not in MetaDrive's default config) would raise an error.  The spaces
+        # only depend on num_agents and sensor config, which are in base_config.
+        headless_config = dict(base_config)
+        headless_config["use_render"] = False
 
-        self.env = MultiAgentRacingEnv(config)
-        self.num_agents = num_agents
-        self.ego_id = "agent0"
-
-        if isinstance(opponent_policy, str):
-            self._opponent_fn = OPPONENT_POLICIES[opponent_policy]
-        else:
-            self._opponent_fn = opponent_policy
-
-        # Get spaces
-        temp_obs, _ = self.env.reset()
+        temp_env = MultiAgentRacingEnv(headless_config)
+        temp_obs, _ = temp_env.reset()
         sample_id = list(temp_obs.keys())[0]
-        self.observation_space = self.env.observation_space[sample_id]
-        self.action_space = self.env.action_space[sample_id]
+        self.observation_space = temp_env.observation_space[sample_id]
+        self.action_space = temp_env.action_space[sample_id]
         self._last_ego_obs = temp_obs.get(self.ego_id, np.zeros(self.observation_space.shape))
         self._opponent_obs = {k: v for k, v in temp_obs.items() if k != self.ego_id}
-        self.env.close()
-        self.env = MultiAgentRacingEnv(config)
+        temp_env.close()
+
+        # Create the real env; apply extra_config then honour render_mode.
+        real_config = dict(base_config)
+        if extra_config:
+            real_config.update(extra_config)
+        if render_mode == "human":
+            real_config["use_render"] = True
+        self.env = MultiAgentRacingEnv(real_config)
 
     def reset(self, seed=None, options=None):
         if seed is not None:
@@ -138,8 +148,8 @@ class RacingEnv(gymnasium.Env):
             ego_obs = self._last_ego_obs
 
         ego_reward = rewards.get(self.ego_id, 0.0)
-        ego_terminated = terms.get(self.ego_id, terms.get("__all__", False))
-        ego_truncated = truncs.get(self.ego_id, truncs.get("__all__", False))
+        ego_terminated = terms.get(self.ego_id, False)
+        ego_truncated = truncs.get(self.ego_id, False)
         ego_info = infos.get(self.ego_id, {})
 
         return ego_obs.copy(), float(ego_reward), bool(ego_terminated), bool(ego_truncated), ego_info

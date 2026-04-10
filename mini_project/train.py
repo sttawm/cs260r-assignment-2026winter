@@ -25,13 +25,42 @@ from stable_baselines3.common.callbacks import (
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from env import RacingEnv, make_racing_env
+from prepare import MAX_TRAIN_DURATION_SECONDS, evaluate
 
-UID = "000000000"  # Replace with your unique UID for submission
-NAME = "Your Agent Name"  # Replace with your agent's name
+UID = "mikey"  # Replace with your unique UID for submission
+
+
+def _get_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+NAME = "Test"  # Replace with your agent's name
 
 assert UID != "000000000", "Please update the UID"
 if NAME == "Your Agent Name":
     print("Consider updating the agent name from the default placeholder.")
+
+
+class TimeLimitCallback(BaseCallback):
+    """Stops training after MAX_TRAIN_DURATION_SECONDS wall-clock seconds from training start."""
+
+    def __init__(self, max_seconds: float, verbose=0):
+        super().__init__(verbose)
+        self._max_seconds = max_seconds
+        self._train_start: float | None = None
+
+    def _on_training_start(self) -> None:
+        self._train_start = time.time()
+        print(f"Training started. Time limit: {self._max_seconds / 3600:.1f}h")
+
+    def _on_step(self) -> bool:
+        elapsed = time.time() - self._train_start
+        if elapsed >= self._max_seconds:
+            print(f"\nTime limit reached ({elapsed:.0f}s). Stopping training.")
+            return False
+        return True
 
 
 class RacingMetricsCallback(BaseCallback):
@@ -65,7 +94,7 @@ class RacingMetricsCallback(BaseCallback):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a racing agent (full example)")
-    parser.add_argument("--total-timesteps", type=int, default=2_000_000)
+    parser.add_argument("--total-timesteps", type=int, default=1_000_000_000)
     parser.add_argument("--num-train-envs", type=int, default=8)
     parser.add_argument("--num-eval-envs", type=int, default=2)
     parser.add_argument("--num-agents", type=int, default=2)
@@ -101,6 +130,8 @@ def main():
     print(f"  Opponent: {args.opponent_policy}")
     print(f"  LR: {args.lr}, Batch: {args.batch_size}")
     print(f"  Seed: {args.seed}")
+    device = _get_device()
+    print(f"  Device: {device}")
     print("=" * 60)
 
     # Create environments
@@ -122,6 +153,7 @@ def main():
 
     # Callbacks
     callbacks = [
+        TimeLimitCallback(MAX_TRAIN_DURATION_SECONDS),
         CheckpointCallback(
             save_freq=max(args.save_freq // args.num_train_envs, 1),
             save_path=args.save_dir,
@@ -138,12 +170,13 @@ def main():
         RacingMetricsCallback(),
     ]
 
-    # Create PPO agent with tuned hyperparameters
+    # Create RL agent
     model = PPO(
         "MlpPolicy",
         train_envs,
         verbose=1,
         seed=args.seed,
+        device=device,
         tensorboard_log=args.log_dir,
         n_steps=args.n_steps,
         n_epochs=args.n_epochs,
@@ -179,13 +212,38 @@ def main():
     print(f"\nTraining complete in {elapsed:.0f}s")
     print(f"Final model saved to {final_path}")
 
-    # Auto-convert to submission format
-    print("\nConverting to submission format...")
-    convert_to_submission(model, os.path.join("agents", f"agent_{UID}"))
-    print(f"Done! Example agent saved to agents/agent_{UID}/")
-
     train_envs.close()
     eval_envs.close()
+
+    # ── Model selection ──────────────────────────────────────────────────
+    # Evaluate both the final model and the EvalCallback's best checkpoint,
+    # then use whichever scores higher win_rate for submission.
+    best_ckpt_path = os.path.join(args.save_dir, "best", "best_model.zip")
+
+    print("\nEvaluating final model...")
+    final_results = evaluate(model, seed=args.seed)
+
+    best_model = model
+    if os.path.exists(best_ckpt_path):
+        print("Evaluating best checkpoint (saved by EvalCallback)...")
+        ckpt = PPO.load(best_ckpt_path, device=device)
+        ckpt_results = evaluate(ckpt, seed=args.seed)
+        if ckpt_results["win_rate"] > final_results["win_rate"]:
+            print(f"Best checkpoint wins "
+                  f"({ckpt_results['win_rate']:.1%} > {final_results['win_rate']:.1%}) "
+                  f"— using checkpoint for submission.")
+            best_model = ckpt
+        else:
+            print(f"Final model wins "
+                  f"({final_results['win_rate']:.1%} >= {ckpt_results['win_rate']:.1%}) "
+                  f"— using final model for submission.")
+    else:
+        print("No EvalCallback checkpoint found — using final model.")
+
+    # Convert the winning model to submission format
+    print("\nConverting to submission format...")
+    convert_to_submission(best_model, os.path.join("agents", f"agent_{UID}"))
+    print(f"Done! Agent saved to agents/agent_{UID}/")
 
 
 def convert_to_submission(model, output_dir):
