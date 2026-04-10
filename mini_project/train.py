@@ -84,9 +84,9 @@ class PeriodicEvalCallback(BaseCallback):
         self._train_start: float | None = None
         self._next_eval_at: float | None = None
         self._eval_num = 0
-        self._best_score = -1.0
+        self._best_win_rate = -1.0
         self._no_improve_streak = 0
-        self.checkpoint_scores: dict[int, float] = {}   # {20: 0.000312, 40: 0.000389, …}
+        self.checkpoint_win_rates: dict[int, float] = {}   # {20: 0.48, 40: 0.52, …}
 
     def _on_training_start(self) -> None:
         self._train_start = time.time()
@@ -102,23 +102,26 @@ class PeriodicEvalCallback(BaseCallback):
         print(f"\n[Periodic eval #{self._eval_num}]  t={elapsed_min:.0f}min")
 
         results = evaluate(self.model, seed=self._seed)
-        score = results["speed_score"]
-        self.checkpoint_scores[bucket] = score
+        win_rate = results["win_rate"]
+        self.checkpoint_win_rates[bucket] = win_rate
         # Machine-readable line for grep
-        print(f"[{bucket}min] speed_score: {score:.6f}")
+        print(f"[{bucket}min] win_rate: {win_rate:.4f}")
+
+        self.logger.record("eval/win_rate", win_rate)
+        self.logger.dump(self.num_timesteps)
 
         self._next_eval_at = time.time() + self.EVAL_INTERVAL_S
 
-        if score > self._best_score:
-            self._best_score = score
+        if win_rate > self._best_win_rate:
+            self._best_win_rate = win_rate
             self._no_improve_streak = 0
-            save_path = os.path.join(self._save_dir, "best_by_score")
+            save_path = os.path.join(self._save_dir, "best_by_winrate")
             self.model.save(save_path)
             print(f"  New best — saved to {save_path}")
         else:
             self._no_improve_streak += 1
             print(f"  No improvement  ({self._no_improve_streak}/{self.PATIENCE}).  "
-                  f"Best so far: {self._best_score:.6f}")
+                  f"Best so far: {self._best_win_rate:.4f}")
             if self._no_improve_streak >= self.PATIENCE:
                 print(f"\nEarly stopping: no improvement for "
                       f"{self.PATIENCE} consecutive evals "
@@ -264,17 +267,17 @@ def main():
 
     train_envs.close()
 
-    # ── Score progression ────────────────────────────────────────────────
-    print("\nSpeed-score progression:")
-    for bucket in sorted(periodic_cb.checkpoint_scores):
-        print(f"  {bucket:3d}min: {periodic_cb.checkpoint_scores[bucket]:.6f}")
+    # ── Win-rate progression ─────────────────────────────────────────────
+    print("\nWin-rate progression:")
+    for bucket in sorted(periodic_cb.checkpoint_win_rates):
+        print(f"  {bucket:3d}min: {periodic_cb.checkpoint_win_rates[bucket]:.4f}")
 
     # ── Model selection ──────────────────────────────────────────────────
-    # Use the checkpoint that achieved the highest speed_score during training;
+    # Use the checkpoint that achieved the highest win_rate during training;
     # fall back to the final model if no periodic eval ran yet.
-    best_ckpt_path = os.path.join(args.save_dir, "best_by_score.zip")
-    if os.path.exists(best_ckpt_path) and periodic_cb._best_score >= 0:
-        print(f"\nLoading best checkpoint (speed_score={periodic_cb._best_score:.6f})...")
+    best_ckpt_path = os.path.join(args.save_dir, "best_by_winrate.zip")
+    if os.path.exists(best_ckpt_path) and periodic_cb._best_win_rate >= 0:
+        print(f"\nLoading best checkpoint (win_rate={periodic_cb._best_win_rate:.4f})...")
         best_model = type(model).load(best_ckpt_path, device=device)
     else:
         print("\nNo periodic-eval checkpoint found — using final model.")
