@@ -7,7 +7,7 @@ This is an experiment to have the LLM do its own research.
 To set up a new experiment, work with the user to:
 
 1. **Agree on a run tag**: propose a tag based on today's date (e.g. `mar5`). The branch `autoresearch/<tag>` must not already exist — this is a fresh run.
-2. **Create the branch**: `git checkout -b autoresearch/<tag>` from current master.
+2. **Create the branch**: `git checkout -b mini_project/autoresearch/<tag>` from current master.
 3. **Read the in-scope files**: The repo is small. Read these files for full context:
    - `README.md` — repository context.
    - `prepare.py` — fixed constants (`MAX_TRAIN_DURATION_SECONDS`), evaluation harness (`evaluate()`), and baseline opponent loading. Do not modify.
@@ -109,7 +109,7 @@ d4e5f6g	0.000000	0.000000	crash	512x512 network (OOM on MPS)
 
 ## The experiment loop
 
-The experiment runs on a dedicated branch (e.g. `autoresearch/mar5` or `autoresearch/mar5-gpu0`).
+The experiment runs on a dedicated branch (e.g. `mini_project/autoresearch/apr9`).
 
 LOOP FOREVER:
 
